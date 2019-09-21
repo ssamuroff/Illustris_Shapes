@@ -49,7 +49,7 @@ def main():
     Lbox = d['Lbox']
 
     # make galaxy selection
-    min_mstar = litte_h*10.0**9.0
+    min_mstar = litte_h*10.0**8.0
     mask, gal_ids = galaxy_selection(min_mstar, basePath, snapNum)
 
     # number of galaxies in selection

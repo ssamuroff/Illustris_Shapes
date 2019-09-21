@@ -8,6 +8,7 @@ from astropy.table import Table, Column
 import time
 from astropy.io import ascii
 import sys
+import glob
 
 from illustris_python.snapshot import loadHalo, snapPath, loadSubhalo
 from illustris_python.groupcat import gcPath, loadHalos, loadSubhalos
@@ -180,6 +181,51 @@ def galaxy_selection(min_mstar, basePath, snapNum):
     return mask, gal_ids[mask]
 
 
+def reset_arrays(Ngals):
+    # create array to store shape properties
+    # eigen values
+    a = np.zeros(Ngals)
+    b = np.zeros(Ngals)
+    c = np.zeros(Ngals)
+    # eigen vectors
+    av = np.zeros((Ngals,3))
+    bv = np.zeros((Ngals,3))
+    cv = np.zeros((Ngals,3))
+
+    return a,b,c,av,bv,cv
+
+def save_arrays(i, gal_ids, a, b, c, av, bv, cv, sim_name, snapNum, shape_type):
+    # save measurements
+    fpath = './data/shape_catalogs/'
+    fname = sim_name + '_' + str(snapNum) + '_'+ shape_type +'_galaxy_shapes-%d.dat'%i
+    ascii.write([gal_ids, a, b, c, av[:,0], av[:,1], av[:,2], bv[:,0], bv[:,1], bv[:,2], cv[:,0], cv[:,1], cv[:,2]], fpath+fname,
+        names=['gal_id', 'a', 'b', 'c',
+        'av_x', 'av_y','av_z',
+        'bv_x', 'bv_y','bv_z',
+        'cv_x', 'cv_y','cv_z'],
+        overwrite=True)
+
+def check_output_exists(i, sim_name, snapNum, shape_type):
+    # check whether the text file this galaxy should be saved in already exists
+    fpath = './data/shape_catalogs/'
+    fname = sim_name + '_' + str(snapNum) + '_'+ shape_type +'_galaxy_shapes-*.dat'
+    files = glob.glob(fpath+fname)
+
+    if len(files)==0:
+        exists = False
+    else:
+        existing_indices = [int(f.split('shapes-')[1].replace('.dat','')) for f in files]
+        jmax = np.max(existing_indices)
+        if (i<=jmax):
+            exists = True
+        else:
+            exists = False
+
+    #import pdb ; pdb.set_trace()
+
+    return exists
+
+
 
 def main():
 
@@ -200,7 +246,7 @@ def main():
     Lbox = d['Lbox']
 
     # make galaxy selection
-    min_mstar = litte_h*10.0**9.0
+    min_mstar = litte_h*10.0**8.
     mask, gal_ids = galaxy_selection(min_mstar, basePath, snapNum)
 
     # number of galaxies in selection
@@ -211,18 +257,15 @@ def main():
     fields = ['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloPos', 'SubhaloHalfmassRadType']
     galaxy_table = loadSubhalos(basePath, snapNum, fields=fields)
 
-    # create array to store shape properties
-    # eigen values
-    a = np.zeros(Ngals)
-    b = np.zeros(Ngals)
-    c = np.zeros(Ngals)
-    # eigen vectors
-    av = np.zeros((Ngals,3))
-    bv = np.zeros((Ngals,3))
-    cv = np.zeros((Ngals,3))
+    a,b,c,av,bv,cv = reset_arrays(Ngals)
+    save_points = np.append(np.arange(1000,Ngals,2000), Ngals-1)
+    print('Will save output over %d files'%len(save_points))
 
     # loop over the list of galaxy IDs
     for i in tqdm(range(Ngals)):
+        if check_output_exists(i, sim_name, snapNum, shape_type):
+            continue
+
         gal_id = gal_ids[i]
         evals, evecs = galaxy_shape(gal_id, galaxy_table, basePath, snapNum, Lbox, shape_type=shape_type)
         a[i] = evals[2]
@@ -232,19 +275,10 @@ def main():
         bv[i,:] = evecs[:,1]
         cv[i,:] = evecs[:,0]
 
-    # save measurements
-    fpath = './data/shape_catalogs/'
-    fname = sim_name + '_' + str(snapNum) + '_'+ shape_type +'_galaxy_shapes.dat'
-    ascii.write([gal_ids, a, b, c,
-                 av[:,0], av[:,1], av[:,2],
-                 bv[:,0], bv[:,1], bv[:,2],
-                 cv[:,0], cv[:,1], cv[:,2]],
-                fpath+fname,
-                names=['gal_id', 'a', 'b', 'c',
-                       'av_x', 'av_y','av_z',
-                       'bv_x', 'bv_y','bv_z',
-                       'cv_x', 'cv_y','cv_z'],
-                overwrite=True)
+        if i in save_points:
+            save_arrays(i, gal_ids, a, b, c, av, bv, cv, sim_name, snapNum, shape_type)
+            print('%d saved %d galaxies'%(i, len(a[a!=0])))
+            a,b,c,av,bv,cv = reset_arrays(Ngals)
 
 
 if __name__ == '__main__':
