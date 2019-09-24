@@ -162,13 +162,13 @@ def galaxy_shape(gal_id, galaxy_table, basePath, snapNum, Lbox, shape_type='redu
     return evals[0], evecs[0]
 
 
-def galaxy_selection(min_mstar, basePath, snapNum):
+def galaxy_selection(min_mstar, min_ndark, basePath, snapNum):
     """
     make a cut on galaxy properties
     """
 
     # make selection
-    galaxy_table = loadSubhalos(basePath, snapNum, fields=['SubhaloGrNr', 'SubhaloMassInRadType'])
+    galaxy_table = loadSubhalos(basePath, snapNum, fields=['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloLenType'])
 
     gal_ids = np.arange(0,len(galaxy_table['SubhaloGrNr']))
 
@@ -176,7 +176,9 @@ def galaxy_selection(min_mstar, basePath, snapNum):
     mstar = galaxy_table['SubhaloMassInRadType'][:,4]
     mstar = mstar*10**10
 
-    mask = (mstar >= min_mstar)
+    ndark = galaxy_table['SubhaloLenType'][:,1]
+
+    mask = (mstar >= min_mstar) & (ndark >= min_ndark)
 
     return mask, gal_ids[mask]
 
@@ -247,7 +249,8 @@ def main():
 
     # make galaxy selection
     min_mstar = litte_h*10.0**8.
-    mask, gal_ids = galaxy_selection(min_mstar, basePath, snapNum)
+    min_ndark = 1000
+    mask, gal_ids = galaxy_selection(min_mstar, min_ndark, basePath, snapNum)
 
     # number of galaxies in selection
     Ngals = len(gal_ids)
