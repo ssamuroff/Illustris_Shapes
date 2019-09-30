@@ -13,21 +13,22 @@ from simulation_props import sim_prop_dict
 from illustris_python.groupcat import gcPath, loadHalos, loadSubhalos
 
 
-def galaxy_selection(min_mstar, basePath, snapNum):
+def galaxy_selection(min_mstar, min_ndark, basePath, snapNum):
     """
     make a cut on galaxy properties
     """
 
     # make selection
-    galaxy_table = loadSubhalos(basePath, snapNum, fields=['SubhaloGrNr', 'SubhaloMassInRadType'])
+    galaxy_table = loadSubhalos(basePath, snapNum, fields=['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloLenType'])
 
     gal_ids = np.arange(0,len(galaxy_table['SubhaloGrNr']))
 
     # mass of stellar particles within 2*R_half
     mstar = galaxy_table['SubhaloMassInRadType'][:,4]
     mstar = mstar*10**10
+    ndark = galaxy_table['SubhaloLenType'][:,1]
 
-    mask = (mstar >= min_mstar)
+    mask = (mstar >= min_mstar) & (ndark >= min_ndark)
 
     return mask, gal_ids[mask]
 
@@ -50,13 +51,14 @@ def main():
 
     # make galaxy selection
     min_mstar = litte_h*10.0**8.0
-    mask, gal_ids = galaxy_selection(min_mstar, basePath, snapNum)
+    min_ndark = 1000
+    mask, gal_ids = galaxy_selection(min_mstar, min_ndark, basePath, snapNum)
 
     # number of galaxies in selection
     Ngals = len(gal_ids)
     print("number of galaxies in selection: {0}".format(Ngals))
 
-    fields = ['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloMassType', 'SubhaloPos', 'SubhaloVel']
+    fields = ['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloMassType', 'SubhaloPos', 'SubhaloVel', 'SubhaloLenType']
 
     galaxy_table = loadSubhalos(basePath, snapNum, fields=fields)
     
@@ -70,6 +72,9 @@ def main():
     vx = galaxy_table['SubhaloVel'][:,0][gal_ids]
     vy = galaxy_table['SubhaloVel'][:,1][gal_ids]
     vz = galaxy_table['SubhaloVel'][:,2][gal_ids]
+
+    ndark = galaxy_table['SubhaloLenType'][:,1][gal_ids]
+    nstar = galaxy_table['SubhaloLenType'][:,4][gal_ids]
 
     mstar_in_twice_halfrad = galaxy_table['SubhaloMassInRadType'][:,4][gal_ids]
     mstar_in_twice_halfrad = mstar_in_twice_halfrad*10**10
@@ -94,12 +99,14 @@ def main():
     ascii.write([gal_ids, host_halo_ids, central_id,
     	         x, y, z,
     	         vx, vy, vz,
+                 ndark, nstar,
     	         mstar_in_twice_halfrad, mstar_all,
     	         host_halo_mass_200m, host_halo_radius_200m, host_halo_fof_mass],
                 fpath+fname,
                 names=['gal_id', 'host_halo_id', 'central_id',
                  'x', 'y', 'z',
                  'vx', 'vy', 'vz',
+                 'npart_dm', 'npart_stellar',
                  'stellar_mass_in_twice_halfrad', 'stellar_mass_all',
                  'host_halo_mass_200m', 'host_halo_radius_200m', 'host_halo_fof_mass'],
                 overwrite=True)
