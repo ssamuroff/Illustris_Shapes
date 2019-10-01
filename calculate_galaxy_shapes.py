@@ -134,22 +134,26 @@ def galaxy_shape(gal_id, galaxy_table, basePath, snapNum, Lbox, shape_type='redu
     gal_position = galaxy_center(gal_id, galaxy_table)
 
     # load stellar particle positions and masses
-    ptcl_coords = loadSubhalo(basePath, snapNum, gal_id, 4, fields=['Coordinates'])/1000.0
-    ptcl_masses = loadSubhalo(basePath, snapNum, gal_id, 4, fields=['Masses'])*10.0**10
+    try:
+        ptcl_coords = loadSubhalo(basePath, snapNum, gal_id, 4, fields=['Coordinates'])/1000.0
+        ptcl_masses = loadSubhalo(basePath, snapNum, gal_id, 4, fields=['Masses'])*10.0**10
+    except: 
+        import pdb ; pdb.set_trace()
 
     # center and account for PBCs
     ptcl_coords = format_particles(gal_position, ptcl_coords, Lbox)
 
     # make a selection cut on the particles
     if shape_type=='non-reduced':
-        ptcl_mask = particle_selection(gal_id, ptcl_coords, galaxy_table, basePath, snapNum, radial_mask=True)
+        ptcl_mask = particle_selection(gal_id, ptcl_coords, galaxy_table, basePath, snapNum, radial_mask=False)
     else:
         ptcl_mask = particle_selection(gal_id, ptcl_coords, galaxy_table,  basePath, snapNum, radial_mask=True)
 
     if shape_type == 'reduced':
         I = reduced_inertia_tensors(ptcl_coords[ptcl_mask], ptcl_masses[ptcl_mask])
     elif shape_type == 'non-reduced':
-        I = inertia_tensors(ptcl_coords[ptcl_mask], ptcl_masses[ptcl_mask])
+        #I = inertia_tensors(ptcl_coords[ptcl_mask], ptcl_masses[ptcl_mask])
+        I = inertia_tensors(ptcl_coords[ptcl_mask], None)
     elif shape_type == 'iterative':
         I = iterative_inertia_tensors_3D(ptcl_coords[ptcl_mask], ptcl_masses[ptcl_mask], rtol=0.01, niter_max=10)
     else:
