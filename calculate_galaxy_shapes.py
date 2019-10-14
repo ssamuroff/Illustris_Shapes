@@ -1,5 +1,5 @@
 """
-script to measure galaxy shapes in the Illustris simmulations
+script to measure galaxy shapes in the Illustris simulations
 """
 
 from __future__ import print_function, division
@@ -8,6 +8,8 @@ from astropy.table import Table, Column
 import time
 from astropy.io import ascii
 import sys
+import glob
+import mpi4py
 
 from illustris_python.snapshot import loadHalo, snapPath, loadSubhalo
 from illustris_python.groupcat import gcPath, loadHalos, loadSubhalos
@@ -141,14 +143,14 @@ def galaxy_shape(gal_id, galaxy_table, basePath, snapNum, Lbox, shape_type='redu
 
     # make a selection cut on the particles
     if shape_type=='non-reduced':
-        ptcl_mask = particle_selection(gal_id, ptcl_coords, galaxy_table, basePath, snapNum, radial_mask=True)
+        ptcl_mask = particle_selection(gal_id, ptcl_coords, galaxy_table, basePath, snapNum, radial_mask=False)
     else:
         ptcl_mask = particle_selection(gal_id, ptcl_coords, galaxy_table,  basePath, snapNum, radial_mask=True)
 
     if shape_type == 'reduced':
         I = reduced_inertia_tensors(ptcl_coords[ptcl_mask], ptcl_masses[ptcl_mask])
     elif shape_type == 'non-reduced':
-        I = inertia_tensors(ptcl_coords[ptcl_mask], ptcl_masses[ptcl_mask])
+        I = inertia_tensors(ptcl_coords[ptcl_mask], None)
     elif shape_type == 'iterative':
         I = iterative_inertia_tensors_3D(ptcl_coords[ptcl_mask], ptcl_masses[ptcl_mask], rtol=0.01, niter_max=10)
     else:
@@ -161,13 +163,13 @@ def galaxy_shape(gal_id, galaxy_table, basePath, snapNum, Lbox, shape_type='redu
     return evals[0], evecs[0]
 
 
-def galaxy_selection(min_mstar, basePath, snapNum):
+def galaxy_selection(min_mstar, min_ndark, basePath, snapNum):
     """
     make a cut on galaxy properties
     """
 
     # make selection
-    galaxy_table = loadSubhalos(basePath, snapNum, fields=['SubhaloGrNr', 'SubhaloMassInRadType'])
+    galaxy_table = loadSubhalos(basePath, snapNum, fields=['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloLenType'])
 
     gal_ids = np.arange(0,len(galaxy_table['SubhaloGrNr']))
 
@@ -175,42 +177,15 @@ def galaxy_selection(min_mstar, basePath, snapNum):
     mstar = galaxy_table['SubhaloMassInRadType'][:,4]
     mstar = mstar*10**10
 
-    mask = (mstar >= min_mstar)
+    ndark = galaxy_table['SubhaloLenType'][:,1]
 
+    mask = (mstar >= min_mstar) & (ndark >= min_ndark)
+
+    import pdb ; pdb.set_trace()
     return mask, gal_ids[mask]
 
 
-
-def main():
-
-    if len(sys.argv)>1:
-        sim_name = sys.argv[1]
-        snapNum = int(sys.argv[2])
-        shape_type = sys.argv[3]
-    else:
-        sim_name = 'Illustris-1' # full physics high-res run
-        snapNum = 135  # z=0
-        shape_type = 'reduced'  # non-reduced, reduced, iterative
-
-    # get simulation properties
-    d = sim_prop_dict[sim_name]
-    basePath = d['basePath']
-    m_dm = d['m_dm']
-    litte_h = d['litte_h']
-    Lbox = d['Lbox']
-
-    # make galaxy selection
-    min_mstar = litte_h*10.0**9.0
-    mask, gal_ids = galaxy_selection(min_mstar, basePath, snapNum)
-
-    # number of galaxies in selection
-    Ngals = len(gal_ids)
-    print("number of galaxies in selection: {0}".format(Ngals))
-
-    # load galaxy table
-    fields = ['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloPos', 'SubhaloHalfmassRadType']
-    galaxy_table = loadSubhalos(basePath, snapNum, fields=fields)
-
+def reset_arrays(Ngals):
     # create array to store shape properties
     # eigen values
     a = np.zeros(Ngals)
@@ -221,8 +196,103 @@ def main():
     bv = np.zeros((Ngals,3))
     cv = np.zeros((Ngals,3))
 
+    return a,b,c,av,bv,cv
+
+def save_arrays(i, gal_ids, a, b, c, av, bv, cv, sim_name, snapNum, shape_type):
+    # save measurements
+    fpath = './data/shape_catalogs/'
+    fname = sim_name + '_' + str(snapNum) + '_'+ shape_type +'_galaxy_shapes-%d.dat'%i
+    ascii.write([gal_ids, a, b, c, av[:,0], av[:,1], av[:,2], bv[:,0], bv[:,1], bv[:,2], cv[:,0], cv[:,1], cv[:,2]], fpath+fname,
+        names=['gal_id', 'a', 'b', 'c',
+        'av_x', 'av_y','av_z',
+        'bv_x', 'bv_y','bv_z',
+        'cv_x', 'cv_y','cv_z'],
+        overwrite=True)
+
+def check_output_exists(i, sim_name, snapNum, shape_type):
+    # check whether the text file this galaxy should be saved in already exists
+    fpath = './data/shape_catalogs/'
+    fname = sim_name + '_' + str(snapNum) + '_'+ shape_type +'_galaxy_shapes-*.dat'
+    files = glob.glob(fpath+fname)
+
+    if len(files)==0:
+        exists = False
+    else:
+        existing_indices = [int(f.split('shapes-')[1].replace('.dat','')) for f in files]
+        jmax = np.max(existing_indices)
+        if (i<=jmax):
+            exists = True
+        else:
+            exists = False
+
+    #import pdb ; pdb.set_trace()
+
+    return exists
+
+
+
+def main():
+
+    try:
+        print("Setting up MPI")
+        import mpi4py.MPI
+        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
+        size = mpi4py.MPI.COMM_WORLD.Get_size()
+
+    except:
+        rank=0
+        size=1
+
+    if len(sys.argv)>1:
+        sim_name = sys.argv[1]
+        snapNum = int(sys.argv[2])
+        shape_type = sys.argv[3]
+    else:
+        sim_name = 'Illustris-1' # full physics high-res run
+        snapNum = 135  # z=0
+        shape_type = 'reduced'  # non-reduced, reduced, iterative
+
+    if len(sys.argv)>4:
+        istart = int(sys.argv[4])
+    else:
+        istart = 0
+
+    # get simulation properties
+    d = sim_prop_dict[sim_name]
+    basePath = d['basePath']
+    m_dm = d['m_dm']
+    litte_h = d['litte_h']
+    Lbox = d['Lbox']
+
+    # make galaxy selection
+    min_mstar = litte_h*10.0**8.
+    min_ndark=1000
+    mask, gal_ids = galaxy_selection(min_mstar, min_ndark, basePath, snapNum)
+
+    # number of galaxies in selection
+    Ngals = len(gal_ids)
+    print("number of galaxies in selection: {0}".format(Ngals))
+
+    # load galaxy table
+    fields = ['SubhaloGrNr', 'SubhaloMassInRadType', 'SubhaloPos', 'SubhaloHalfmassRadType']
+    galaxy_table = loadSubhalos(basePath, snapNum, fields=fields)
+
+    a,b,c,av,bv,cv = reset_arrays(Ngals)
+    save_points = np.append(np.arange(1000,Ngals,2000), Ngals-1)
+    print('Will save output over %d files'%len(save_points))
+
+    f=istart
+    #import pdb ; pdb.set_trace()
+
     # loop over the list of galaxy IDs
-    for i in tqdm(range(Ngals)):
+    for i in tqdm(range(istart,Ngals)):
+        if i in save_points:
+            f+=1
+        if (f%size!=rank) or (i<istart):
+            continue
+        #if check_output_exists(i, sim_name, snapNum, shape_type):
+        #    continue
+
         gal_id = gal_ids[i]
         evals, evecs = galaxy_shape(gal_id, galaxy_table, basePath, snapNum, Lbox, shape_type=shape_type)
         a[i] = evals[2]
@@ -232,19 +302,10 @@ def main():
         bv[i,:] = evecs[:,1]
         cv[i,:] = evecs[:,0]
 
-    # save measurements
-    fpath = './data/shape_catalogs/'
-    fname = sim_name + '_' + str(snapNum) + '_'+ shape_type +'_galaxy_shapes.dat'
-    ascii.write([gal_ids, a, b, c,
-                 av[:,0], av[:,1], av[:,2],
-                 bv[:,0], bv[:,1], bv[:,2],
-                 cv[:,0], cv[:,1], cv[:,2]],
-                fpath+fname,
-                names=['gal_id', 'a', 'b', 'c',
-                       'av_x', 'av_y','av_z',
-                       'bv_x', 'bv_y','bv_z',
-                       'cv_x', 'cv_y','cv_z'],
-                overwrite=True)
+        if i in save_points:
+            save_arrays(i, gal_ids, a, b, c, av, bv, cv, sim_name, snapNum, shape_type)
+            print('%d saved %d galaxies'%(i, len(a[a!=0])))
+            a,b,c,av,bv,cv = reset_arrays(Ngals)
 
 
 if __name__ == '__main__':
