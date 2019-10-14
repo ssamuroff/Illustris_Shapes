@@ -1,5 +1,5 @@
 """
-script to measure galaxy shapes in the Illustris simmulations
+script to measure galaxy shapes in the Illustris simulations
 """
 
 from __future__ import print_function, division
